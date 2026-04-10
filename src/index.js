@@ -38,7 +38,8 @@ const allowedOrigins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://d2fc-2401-4900-b511-479c-ec96-82fe-408d-66f6.ngrok-free.app",
-    "https://ditdev.net"
+    "https://ditdev.net",
+    "https://sossystem1.infinityfree.me"
 ];
 
 app.use(cors({
