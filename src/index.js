@@ -13,6 +13,7 @@ const ambulanceRoutes = require('./routes/ambulanceRoutes');
 const incidentRoutes = require('./routes/incidentRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const smsRoutes = require('./routes/smsRoutes');
 
 // PDF-spec controllers for alias routes
 const { triggerSOS } = require('./controllers/incident.controller');
@@ -36,7 +37,8 @@ const allowedOrigins = [
     "http://127.0.0.1:5500",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://d2fc-2401-4900-b511-479c-ec96-82fe-408d-66f6.ngrok-free.app"
+    "https://d2fc-2401-4900-b511-479c-ec96-82fe-408d-66f6.ngrok-free.app",
+    "https://ditdev.net"
 ];
 
 app.use(cors({
@@ -67,6 +69,7 @@ app.use('/api/ambulances', ambulanceRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/sms', smsRoutes);
 
 if (swaggerUi && swaggerDocument) {
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));

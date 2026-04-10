@@ -34,12 +34,14 @@ const registerUser = async (req, res) => {
         }
 
         const existingUser = await User.findOne({ where: { phone } });
+        console.log('[Register] phone check:', phone, '| found:', existingUser ? `id=${existingUser.id}` : 'none');
         if (existingUser) {
             return res.status(409).json({ success: false, message: 'User already exists with this phone number' });
         }
 
         if (email) {
             const existingEmail = await User.findOne({ where: { email } });
+            console.log('[Register] email check:', email, '| found:', existingEmail ? `id=${existingEmail.id}` : 'none');
             if (existingEmail) {
                 return res.status(409).json({ success: false, message: 'User already exists with this email' });
             }

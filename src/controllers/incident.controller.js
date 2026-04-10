@@ -1,4 +1,4 @@
-const { sequelize, Incident, IncidentTimeline, Notification, User, Ambulance, Hospital } = require('../models');
+const { sequelize, Incident, IncidentTimeline, Notification, User, Ambulance, Hospital, EmergencyContact } = require('../models');
 const { Op } = require('sequelize');
 const { findNearestAmbulance, findNearestHospital, getDistanceKm } = require('../services/geoService');
 const { estimateEtaMinutes } = require('../services/mapsService');
@@ -102,20 +102,31 @@ const triggerSOS = async (req, res) => {
         const payload = { incidentId: incident.id, incident, user, ambulance: nearestAmbulance, hospital: nearestHospital };
         notifyNewEmergency({ ...payload, ambulanceId: nearestAmbulance.id, hospitalId: nearestHospital.id, userId: user_id });
 
-        if (user.emergency_contact_phone) {
-            const smsMsg = `EMERGENCY ALERT: ${user.name} needs help at ${address || `${latitude},${longitude}`}. Ambulance ${nearestAmbulance.vehicle_number} dispatched. ETA: ${etaMinutes} min.`;
-            const smsResult = await sendEmergencySms(user.emergency_contact_phone, smsMsg);
-            await Notification.create({
-                incident_id: incident.id,
-                type: 'sms',
-                recipient_type: 'family',
-                recipient_name: user.emergency_contact_name,
-                recipient_contact: user.emergency_contact_phone,
-                message: smsMsg,
-                status: smsResult.success ? 'sent' : 'failed',
-                error_message: smsResult.error || null,
+        // Send SMS to up to 2 emergency contacts (non-blocking — SOS flow must not crash)
+        EmergencyContact.findAll({ where: { user_id }, limit: 2 }).then(async (contacts) => {
+            if (!contacts.length) return;
+            const hospitalName = nearestHospital?.name || 'Nearest hospital';
+            const smsMsg = `${user.name} ka accident hua hai. Please call karo. Hospital: ${hospitalName}`;
+            // Batch both contacts in a single API call
+            const phones = contacts
+                .map((c) => String(c.phone).replace(/\D/g, '').slice(-10))
+                .filter((p) => p.length === 10)
+                .join(',');
+            if (!phones) return;
+            const smsResult = await sendEmergencySms(phones, smsMsg).catch(() => ({ success: false, error: 'send error' }));
+            contacts.forEach((contact) => {
+                Notification.create({
+                    incident_id: incident.id,
+                    type: 'sms',
+                    recipient_type: 'family',
+                    recipient_name: contact.name,
+                    recipient_contact: contact.phone,
+                    message: smsMsg,
+                    status: smsResult.success ? 'sent' : 'failed',
+                    error_message: smsResult.error || null,
+                }).catch(() => {});
             });
-        }
+        }).catch(() => {});
 
         return res.status(201).json({
             success: true,
@@ -317,7 +328,15 @@ const listIncidents = async (req, res) => {
 
         if (status) where.status = status;
         if (incident_type) where.incident_type = incident_type;
-        if (user_id) where.user_id = user_id;
+
+        // Ownership: normal users can only see their own incidents
+        if (req.user.role === 'user') {
+            where.user_id = req.user.id;
+        } else if (req.user.role === 'ambulance_driver') {
+            where.ambulance_id = req.user.id;
+        } else if (user_id) {
+            where.user_id = user_id;
+        }
 
         if (date_from || date_to) {
             where.created_at = {};

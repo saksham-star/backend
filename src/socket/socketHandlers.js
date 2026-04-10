@@ -18,6 +18,14 @@ const registerSocketHandlers = (io) => {
             socket.emit('joined', { room: `hospital:${hospitalId}` });
         });
 
+        socket.on('join-incident', ({ incidentId } = {}) => {
+            if (!incidentId) {
+                return socket.emit('socket-error', { event: 'join-incident', message: 'incidentId is required' });
+            }
+            socket.join(`incident:${incidentId}`);
+            socket.emit('joined', { room: `incident:${incidentId}` });
+        });
+
         socket.on('sos-trigger', (payload = {}) => {
             const { incidentId, userId, latitude, longitude } = payload;
             if (!incidentId || !userId || !latitude || !longitude) {

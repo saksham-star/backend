@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l d:/hackthon26/Emergency-Alert-System_Code_Red/backend/src/models/*.js)",
+      "Bash(grep -v \"^d.*\\\\.$\")",
+      "Bash(grep -v \"^d.*\\\\.\\\\.$\")",
+      "Read(//d/hackthon26/Emergency-Alert-System_Code_Red/frontend/user-auth/**)",
+      "Bash(mysql -h 127.0.0.1 -P 3308 -u root -proot emergency_db -e \"SELECT id, name, phone, email FROM users ORDER BY created_at DESC LIMIT 5;\")",
+      "Bash(node -e ':*)"
+    ],
+    "additionalDirectories": [
+      "d:\\hackthon26\\Emergency-Alert-System_Code_Red\\frontend\\user-auth\\js"
+    ]
+  }
+}

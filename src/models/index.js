@@ -21,6 +21,8 @@ Incident.belongsTo(Hospital, { foreignKey: 'hospital_id', as: 'hospital' });
 Incident.hasMany(IncidentTimeline, { foreignKey: 'incident_id', as: 'timeline' });
 
 User.hasMany(Incident, { foreignKey: 'user_id', as: 'incidents' });
+User.hasMany(EmergencyContact, { foreignKey: 'user_id', as: 'emergencyContacts' });
+EmergencyContact.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 module.exports = {
     sequelize,

@@ -1,4 +1,4 @@
-const { User, Incident } = require('../models');
+const { User, Incident, EmergencyContact } = require('../models');
 
 const ALLOWED_UPDATE_FIELDS = [
     'name', 'email', 'age', 'gender', 'blood_group',
@@ -90,4 +90,69 @@ const getUserIncidents = async (req, res) => {
     }
 };
 
-module.exports = { getUserById, updateUser, getUserIncidents };
+// GET /api/users/:id/emergency-contacts
+const getEmergencyContacts = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (req.user.id !== id) return res.status(403).json({ success: false, message: 'Access denied' });
+
+        const contacts = await EmergencyContact.findAll({
+            where: { user_id: id },
+            attributes: ['id', 'name', 'phone', 'relationship', 'is_primary'],
+            order: [['is_primary', 'DESC'], ['id', 'ASC']],
+            limit: 2,
+        });
+
+        return res.status(200).json({ success: true, data: contacts });
+    } catch (error) {
+        console.error('getEmergencyContacts:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+// PUT /api/users/:id/emergency-contacts
+// Body: [{ name, phone, relationship, is_primary }]  — max 2 entries
+const saveEmergencyContacts = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        if (req.user.id !== id) return res.status(403).json({ success: false, message: 'Access denied' });
+
+        let contacts = req.body.contacts;
+        if (!Array.isArray(contacts)) return res.status(400).json({ success: false, message: 'contacts must be an array' });
+
+        // Max 2
+        contacts = contacts.slice(0, 2).filter(c => c.name && c.phone);
+
+        // Validate phones
+        for (const c of contacts) {
+            const digits = String(c.phone).replace(/\D/g, '');
+            if (digits.length < 10) return res.status(400).json({ success: false, message: `Invalid phone: ${c.phone}` });
+        }
+
+        // Duplicate phone check
+        const phones = contacts.map(c => String(c.phone).replace(/\D/g, ''));
+        if (new Set(phones).size !== phones.length) {
+            return res.status(400).json({ success: false, message: 'Duplicate phone numbers not allowed' });
+        }
+
+        // Replace all existing contacts for user
+        await EmergencyContact.destroy({ where: { user_id: id } });
+
+        const created = await EmergencyContact.bulkCreate(
+            contacts.map((c, i) => ({
+                user_id: id,
+                name: c.name,
+                phone: String(c.phone).replace(/\D/g, ''),
+                relationship: c.relationship || 'other',
+                is_primary: i === 0,
+            }))
+        );
+
+        return res.status(200).json({ success: true, message: 'Emergency contacts saved', data: created });
+    } catch (error) {
+        console.error('saveEmergencyContacts:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+};
+
+module.exports = { getUserById, updateUser, getUserIncidents, getEmergencyContacts, saveEmergencyContacts };
