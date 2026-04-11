@@ -80,11 +80,23 @@ const triggerSOS = async (req, res) => {
             notifyNewEmergency({ incidentId: incident.id, incident, user, ambulanceId: null, hospitalId: null, userId: user_id });
 
             EmergencyContact.findAll({ where: { user_id }, limit: 2 }).then(async (contacts) => {
-                if (!contacts.length) return;
-                const smsMsg = `${user.name} ka accident hua hai. Please call karo. Dispatch pending.`;
-                const phones = contacts.map((c) => String(c.phone).replace(/\D/g, '').slice(-10)).filter((p) => p.length === 10).join(',');
-                if (!phones) return;
-                await sendEmergencySms(phones, smsMsg).catch(() => {});
+                const smsMsg = `ALERT: ${user.name} ne SOS bheja hai. Abhi koi ambulance available nahi. Help chahiye to call karo.`;
+
+                const allPhones = new Set();
+                const userPhone = String(user.phone || '').replace(/\D/g, '').slice(-10);
+                if (userPhone.length === 10) allPhones.add(userPhone);
+                contacts.forEach((c) => {
+                    const p = String(c.phone).replace(/\D/g, '').slice(-10);
+                    if (p.length === 10) allPhones.add(p);
+                });
+
+                const phoneStr = [...allPhones].join(',');
+                if (!phoneStr) return;
+                await sendEmergencySms(phoneStr, smsMsg, {
+                    name: user.name,
+                    hospital: 'Dispatch pending',
+                    caseId: incident.id,
+                }).catch(() => {});
             }).catch(() => {});
 
             return res.status(201).json({
@@ -126,25 +138,41 @@ const triggerSOS = async (req, res) => {
         const payload = { incidentId: incident.id, incident, user, ambulance: nearestAmbulance, hospital: nearestHospital };
         notifyNewEmergency({ ...payload, ambulanceId: nearestAmbulance.id, hospitalId: nearestHospital.id, userId: user_id });
 
-        // Send SMS to up to 2 emergency contacts (non-blocking — SOS flow must not crash)
+        // Send SMS — user themselves + up to 2 emergency contacts (non-blocking)
         EmergencyContact.findAll({ where: { user_id }, limit: 2 }).then(async (contacts) => {
-            if (!contacts.length) return;
             const hospitalName = nearestHospital?.name || 'Nearest hospital';
-            const smsMsg = `${user.name} ka accident hua hai. Please call karo. Hospital: ${hospitalName}`;
-            // Batch both contacts in a single API call
-            const phones = contacts
-                .map((c) => String(c.phone).replace(/\D/g, '').slice(-10))
-                .filter((p) => p.length === 10)
-                .join(',');
-            if (!phones) return;
-            const smsResult = await sendEmergencySms(phones, smsMsg).catch(() => ({ success: false, error: 'send error' }));
-            contacts.forEach((contact) => {
+            const smsMsg = `ALERT: ${user.name} ne SOS bheja hai. Ambulance dispatch ho gayi. Hospital: ${hospitalName}. Case #${incident.id}`;
+
+            // Build deduplicated phone set: user first, then contacts
+            const allPhones = new Set();
+            const userPhone = String(user.phone || '').replace(/\D/g, '').slice(-10);
+            if (userPhone.length === 10) allPhones.add(userPhone);
+            contacts.forEach((c) => {
+                const p = String(c.phone).replace(/\D/g, '').slice(-10);
+                if (p.length === 10) allPhones.add(p);
+            });
+
+            const phoneStr = [...allPhones].join(',');
+            if (!phoneStr) return;
+
+            const smsResult = await sendEmergencySms(phoneStr, smsMsg, {
+                name: user.name,
+                hospital: hospitalName,
+                caseId: incident.id,
+            }).catch(() => ({ success: false, error: 'send error' }));
+
+            // Log notification for every recipient
+            const recipients = [
+                { name: user.name, phone: user.phone, type: 'user' },
+                ...contacts.map((c) => ({ name: c.name, phone: c.phone, type: 'family' })),
+            ];
+            recipients.forEach(({ name, phone, type }) => {
                 Notification.create({
                     incident_id: incident.id,
                     type: 'sms',
-                    recipient_type: 'family',
-                    recipient_name: contact.name,
-                    recipient_contact: contact.phone,
+                    recipient_type: type,
+                    recipient_name: name,
+                    recipient_contact: phone,
                     message: smsMsg,
                     status: smsResult.success ? 'sent' : 'failed',
                     error_message: smsResult.error || null,
