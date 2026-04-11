@@ -146,35 +146,75 @@ const loginUser = async (req, res) => {
 
 /**
  * HOSPITAL ADMIN REGISTER
+ * Mode 1: hospital_id provided → use existing hospital
+ * Mode 2: hospital_id absent → create hospital first, then admin
  */
 const registerHospitalAdmin = async (req, res) => {
     try {
         const {
             hospital_id,
+            admin_name,
             name,
             email,
             password,
             phone,
             role,
+            address,
+            city,
+            state,
+            pincode,
+            available_beds,
+            specialties,
+            latitude,
+            longitude,
         } = req.body;
 
-        if (!hospital_id || !name || !email || !password || !phone) {
+        if (!email || !password || !phone) {
             return res.status(400).json({
                 success: false,
-                message: 'hospital_id, name, email, phone and password are required',
+                message: 'email, phone and password are required',
             });
         }
 
-        const hospital = await Hospital.findByPk(hospital_id);
-        if (!hospital) {
-            return res.status(404).json({
-                success: false,
-                message: 'Hospital not found',
+        // admin_name optional — falls back to email
+        const adminName = admin_name || name || email;
+
+        let hospital;
+
+        if (hospital_id) {
+            hospital = await Hospital.findByPk(hospital_id);
+            if (!hospital) {
+                return res.status(404).json({ success: false, message: 'Hospital not found' });
+            }
+        } else {
+            const hospitalName = req.body.name;
+            if (!hospitalName || !address) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'name and address are required to create a new hospital',
+                });
+            }
+            const specialtiesStr = Array.isArray(specialties)
+                ? specialties.join(',')
+                : (specialties || null);
+
+            hospital = await Hospital.create({
+                name: hospitalName,
+                email,
+                phone,
+                address,
+                city: city || null,
+                state: state || null,
+                pincode: pincode || null,
+                latitude: latitude || 0,
+                longitude: longitude || 0,
+                available_beds: available_beds || 50,
+                total_beds: available_beds || 50,
+                specialties: specialtiesStr,
             });
         }
 
         const existingAdmin = await HospitalAdmin.findOne({ where: { email } });
-
         if (existingAdmin) {
             return res.status(409).json({
                 success: false,
@@ -185,18 +225,18 @@ const registerHospitalAdmin = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const admin = await HospitalAdmin.create({
-            hospital_id,
-            name,
+            hospital_id: hospital.id,
+            name: adminName,
             email,
             password: hashedPassword,
             phone,
-            role: role || 'staff',
+            role: role || 'admin',
         });
 
         const token = generateToken({
             id: admin.id,
             role: 'hospital_admin',
-            hospital_id: admin.hospital_id,
+            hospital_id: hospital.id,
         });
 
         return res.status(201).json({
@@ -208,7 +248,8 @@ const registerHospitalAdmin = async (req, res) => {
                 name: admin.name,
                 email: admin.email,
                 phone: admin.phone,
-                hospital_id: admin.hospital_id,
+                hospital_id: hospital.id,
+                hospital_name: hospital.name,
                 role: 'hospital_admin',
                 admin_role: admin.role,
             },
@@ -280,6 +321,8 @@ const loginHospitalAdmin = async (req, res) => {
             success: true,
             message: 'Hospital admin login successful',
             token,
+            id: admin.id,
+            hospital_id: admin.hospital_id,
             data: {
                 id: admin.id,
                 name: admin.name,

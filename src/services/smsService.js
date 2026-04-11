@@ -3,7 +3,7 @@ function normalizePhone(phone) {
     const digits = String(phone).replace(/\D/g, '');
     if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
     if (digits.length === 13 && digits.startsWith('091')) return digits.slice(3);
-    return digits.slice(-10); // take last 10 digits as best effort
+    return digits.slice(-10);
 }
 
 // OTP store: normalizedPhone → { otp, expiresAt }
@@ -14,11 +14,15 @@ function _generateOtp() {
     return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function _normalizeNumbers(numbers) {
+    return (Array.isArray(numbers) ? numbers : String(numbers).split(','))
+        .map((n) => normalizePhone(n.trim()))
+        .filter((n) => n.length === 10)
+        .join(',');
+}
+
 /**
- * Core Fast2SMS sender.
- * Supports two call styles (backward compat with existing callers):
- *   sendSms({ numbers, message })   — object style
- *   sendSms('9876543210', 'text')   — legacy positional style
+ * Core Fast2SMS sender — route q (custom message).
  * numbers: 10-digit string, comma-separated string, or array
  */
 const sendSms = async (numbersOrOptions, messageLegacy) => {
@@ -31,21 +35,17 @@ const sendSms = async (numbersOrOptions, messageLegacy) => {
     }
 
     const key   = process.env.FAST2SMS_API_KEY;
-    const url   = process.env.FAST2SMS_URL   || 'https://www.fast2sms.com/dev/bulkV2';
+    const url   = process.env.FAST2SMS_URL || 'https://www.fast2sms.com/dev/bulkV2';
     const route = process.env.FAST2SMS_ROUTE || 'q';
 
     if (!key) {
-        console.warn('[SMS] FAST2SMS_API_KEY not set — skipping SMS');
+        console.warn('[SMS] FAST2SMS_API_KEY not set — skipping');
         return { success: false, error: 'SMS service not configured' };
     }
 
-    // Normalize: accept array or comma-separated string
-    const normalizedNums = (Array.isArray(numbers) ? numbers : String(numbers).split(','))
-        .map((n) => normalizePhone(n.trim()))
-        .filter((n) => n.length === 10)
-        .join(',');
-
+    const normalizedNums = _normalizeNumbers(numbers);
     if (!normalizedNums) {
+        console.warn('[SMS] No valid 10-digit numbers after normalization. Input:', numbers);
         return { success: false, error: 'No valid phone numbers provided' };
     }
 
@@ -53,6 +53,8 @@ const sendSms = async (numbersOrOptions, messageLegacy) => {
     const timeout = setTimeout(() => controller.abort(), 8000);
 
     try {
+        console.log(`[SMS] Sending | route:${route} | to:${normalizedNums} | msg:${String(message).substring(0, 60)}`);
+
         const res = await fetch(url, {
             method: 'POST',
             headers: {
@@ -71,10 +73,11 @@ const sendSms = async (numbersOrOptions, messageLegacy) => {
         clearTimeout(timeout);
 
         const data = await res.json().catch(() => ({}));
+        console.log('[SMS] Fast2SMS response:', JSON.stringify(data));
 
         if (!res.ok || data.return === false) {
-            console.error('[SMS] Fast2SMS error:', data.message || res.status);
-            return { success: false, error: 'SMS send failed' };
+            console.error('[SMS] Failed:', data.message || res.status);
+            return { success: false, error: data.message || 'SMS send failed' };
         }
 
         return { success: true, data };
@@ -95,17 +98,21 @@ const sendSms = async (numbersOrOptions, messageLegacy) => {
 const sendVerificationSms = async (phone) => {
     const normalized = normalizePhone(phone);
     if (normalized.length !== 10) {
+        console.warn('[SMS][OTP] Invalid phone after normalize:', phone, '->', normalized);
         return { success: false, error: 'Invalid phone number' };
     }
 
     const otp = _generateOtp();
     _otpStore.set(normalized, { otp, expiresAt: Date.now() + OTP_TTL_MS });
+    console.log(`[SMS][OTP] Generated OTP ${otp} for ${normalized}`);
 
-    const message = `Your OTP is ${otp}. Do not share it. Valid for 5 minutes.`;
-    const result = await sendSms({ numbers: normalized, message });
+    const result = await sendSms({
+        numbers: normalized,
+        message: `Your OTP is ${otp}. Do not share it. Valid for 5 minutes.`,
+    });
 
     if (!result.success) {
-        _otpStore.delete(normalized); // allow immediate retry
+        _otpStore.delete(normalized);
     }
 
     return result;
@@ -113,7 +120,6 @@ const sendVerificationSms = async (phone) => {
 
 /**
  * Verify a 6-digit OTP. One-time use; auto-deletes on success or expiry.
- * Returns { valid: boolean, reason?: string }
  */
 const verifyOtp = (phone, otp) => {
     const normalized = normalizePhone(phone);
@@ -136,7 +142,6 @@ const verifyOtp = (phone, otp) => {
 
 /**
  * Emergency/SOS SMS — `to` may be comma-separated for batch.
- * Backward-compatible signature kept for existing callers.
  */
 const sendEmergencySms = (to, message) => sendSms({ numbers: to, message });
 

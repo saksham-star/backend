@@ -8,7 +8,8 @@
       "Bash(mysql -h 127.0.0.1 -P 3308 -u root -proot emergency_db -e \"SELECT id, name, phone, email FROM users ORDER BY created_at DESC LIMIT 5;\")",
       "Bash(node -e ':*)",
       "Bash(grep -r \"FAST2SMS\" .env*)",
-      "Bash(ls -la .env*)"
+      "Bash(ls -la .env*)",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); console.log\\('KEY:', process.env.FAST2SMS_API_KEY ? process.env.FAST2SMS_API_KEY.substring\\(0,10\\)+'...' : 'MISSING'\\); console.log\\('URL:', process.env.FAST2SMS_URL\\); console.log\\('ROUTE:', process.env.FAST2SMS_ROUTE\\);\")"
     ],
     "additionalDirectories": [
       "d:\\hackthon26\\Emergency-Alert-System_Code_Red\\frontend\\user-auth\\js"

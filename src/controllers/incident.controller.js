@@ -64,14 +64,38 @@ const triggerSOS = async (req, res) => {
             findNearestHospital(latitude, longitude),
         ]);
 
-        if (!nearestAmbulance) {
-            await t.rollback();
-            return res.status(503).json({ success: false, message: 'No available ambulance found nearby' });
-        }
+        // If no ambulance or hospital available, still commit incident as pending — never fail SOS creation
+        if (!nearestAmbulance || !nearestHospital) {
+            const pendingMsg = !nearestAmbulance
+                ? 'No ambulance available nearby. Awaiting dispatch.'
+                : 'No hospital with available beds found. Awaiting assignment.';
+            await IncidentTimeline.create({
+                incident_id: incident.id,
+                status: 'pending',
+                message: pendingMsg,
+                created_by: 'system',
+            }, { transaction: t });
+            await t.commit();
 
-        if (!nearestHospital) {
-            await t.rollback();
-            return res.status(503).json({ success: false, message: 'No available hospital found nearby' });
+            notifyNewEmergency({ incidentId: incident.id, incident, user, ambulanceId: null, hospitalId: null, userId: user_id });
+
+            EmergencyContact.findAll({ where: { user_id }, limit: 2 }).then(async (contacts) => {
+                if (!contacts.length) return;
+                const smsMsg = `${user.name} ka accident hua hai. Please call karo. Dispatch pending.`;
+                const phones = contacts.map((c) => String(c.phone).replace(/\D/g, '').slice(-10)).filter((p) => p.length === 10).join(',');
+                if (!phones) return;
+                await sendEmergencySms(phones, smsMsg).catch(() => {});
+            }).catch(() => {});
+
+            return res.status(201).json({
+                success: true,
+                message: 'Emergency alert sent. Help will be dispatched shortly.',
+                data: {
+                    incident: { id: incident.id, status: 'pending', estimated_eta_minutes: null },
+                    ambulance: null,
+                    hospital: null,
+                },
+            });
         }
 
         const etaMinutes = estimateEtaMinutes(nearestAmbulance.distance_km);
